@@ -1461,7 +1461,7 @@ pub fn stream_body<
     match &mut data.input {
         Input::Reader(input) => {
             let start = input.stream_position().map_err(VcdParseError::from)?;
-            let stop_pos = determine_len(input).map_err(VcdParseError::from)? as usize;
+            let stop_pos = determine_len(input)? as usize;
             parse_body(input, &mut disp, stop_pos, None)?;
             // reset stream so that we can read data again
             input
