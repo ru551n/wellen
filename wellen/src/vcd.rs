@@ -1180,12 +1180,8 @@ fn parse_first_token(token: &[u8]) -> Result<FirstTokenResult> {
         b'b' | b'B' | b'r' | b'R' | b's' | b'S' => Ok(FirstTokenResult::MultiBitValue),
         _ => {
             match token {
-                b"$dumpall" => {
-                    // interpret dumpall as indicating timestep zero
-                    Ok(FirstTokenResult::Time(0))
-                }
                 b"$comment" => Ok(FirstTokenResult::CommentStart),
-                b"$dumpvars" | b"$end" | b"$dumpoff" | b"$dumpon" => {
+                b"$dumpvars" | b"$end" | b"$dumpoff" | b"$dumpon" | b"$dumpall" => {
                     // ignore dumpvars, dumpoff, dumpon, and end command
                     Ok(FirstTokenResult::IgnoredCmd)
                 }
