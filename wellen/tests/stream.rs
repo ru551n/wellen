@@ -10,7 +10,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek};
 use wellen::simple::Waveform;
 use wellen::stream::*;
-use wellen::{Hierarchy, LoadOptions, SignalRef, SignalValue, SignalValueRef, Time, TimeTableIdx};
+use wellen::{
+    Hierarchy, ItemRef, LoadOptions, SignalRef, SignalValue, SignalValueRef, Time, TimeTableIdx,
+};
 
 mod utils;
 
@@ -591,4 +593,42 @@ fn diff_stream_questa_sim_derived_signal() {
     let filename = "inputs/questa-sim/wellen-issue-57-uart.vcd";
     let vars = ["tb_uart.dut.prescale"];
     diff_stream_for_vars(filename, vars.as_slice());
+}
+
+/// The stream_time_steps method should include all time steps, even if there is no change.
+#[test]
+fn test_stream_time_steps_do_not_skip_empty() {
+    let filename = "inputs/fst-writer/multi0keep2const.fst";
+
+    // load the time steps through the simple interface
+    let expected_time_steps = {
+        wellen::simple::read(filename)
+            .unwrap()
+            .time_table()
+            .to_vec()
+    };
+
+    // we select a signal which does not change at time 1
+    let mut wave = load_streaming(filename);
+    let counter_item = wave
+        .hierarchy()
+        .lookup_item_by_name("multi0keep2const.lsb_unit.counter")
+        .unwrap();
+    let counter_signal = if let ItemRef::Var(v) = counter_item {
+        wave.hierarchy()[v].signal_ref()
+    } else {
+        unreachable!()
+    };
+    let signals = vec![counter_signal];
+
+    let mut collected_time_steps = vec![];
+    let mut no_change_steps = 0u32;
+    wave.stream_time_steps::<()>(Filter::include_signals(&signals), |time, _, changed| {
+        collected_time_steps.push(time);
+        no_change_steps += changed.is_empty() as u32;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(no_change_steps, 0);
+    assert_eq!(expected_time_steps, collected_time_steps);
 }
