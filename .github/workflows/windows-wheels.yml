@@ -73,9 +73,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "${{ inputs.ref }}-win" >/dev/null 2>&1 \
-            || gh release create "${{ inputs.ref }}-win" \
-                 --title "${{ inputs.ref }} (Windows wheels)" \
+          # Reuse the plain upstream tag as the release tag (no "-win"
+          # suffix): keeps the version string a clean semver so the
+          # github-releases datasource / Renovate's regex managers in
+          # downstream consumers (e.g. waver-mcp) can track it without
+          # any prerelease-suffix ambiguity.
+          gh release view "${{ inputs.ref }}" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.ref }}" \
+                 --title "${{ inputs.ref }} (+ Windows wheels)" \
                  --notes "Windows wheels for pywellen ${{ inputs.ref }}, built via maturin from this fork. Not published to PyPI; for direct-URL consumption only (e.g. waver-mcp)." \
                  --target "${{ inputs.ref }}"
-          gh release upload "${{ inputs.ref }}-win" dist/*.whl --clobber
+          gh release upload "${{ inputs.ref }}" dist/*.whl --clobber
