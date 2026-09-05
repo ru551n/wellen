@@ -1,0 +1,81 @@
+name: windows wheels (fork-only, not published to PyPI)
+
+# Builds pywellen wheels for windows-latest via maturin and attaches them
+# to a GitHub Release on this fork. Upstream's own release.yml only builds
+# linux/macos wheels; this fills the gap for downstream consumers (e.g.
+# waver-mcp) that need a prebuilt Windows wheel without requiring a Rust
+# toolchain on the end user's machine, and without publishing anything to
+# PyPI ourselves.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or commit to build (must exist in this repo)"
+        required: true
+      python-versions:
+        description: "Comma-separated CPython versions to build wheels for"
+        required: false
+        default: "3.13,3.14"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.split.outputs.versions }}
+    steps:
+      - id: split
+        shell: bash
+        run: |
+          versions=$(python3 -c "import json,sys; print(json.dumps('${{ inputs.python-versions }}'.split(',')))")
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.prepare.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          args: --release --manifest-path pywellen/Cargo.toml --out dist --interpreter python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-py${{ matrix.python-version }}
+          path: dist/*.whl
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: wheels-windows-py*
+          path: dist
+          merge-multiple: true
+      - name: Create/update release with wheel assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ inputs.ref }}-win" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.ref }}-win" \
+                 --title "${{ inputs.ref }} (Windows wheels)" \
+                 --notes "Windows wheels for pywellen ${{ inputs.ref }}, built via maturin from this fork. Not published to PyPI; for direct-URL consumption only (e.g. waver-mcp)." \
+                 --target "${{ inputs.ref }}"
+          gh release upload "${{ inputs.ref }}-win" dist/*.whl --clobber
