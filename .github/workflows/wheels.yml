@@ -105,9 +105,11 @@ jobs:
           # datasource / Renovate's regex managers in downstream consumers
           # (e.g. waver-mcp) can track it without prerelease-suffix
           # ambiguity.
+          # No --target here: the tag already exists (it's an upstream
+          # tag we mirror), and GitHub's release API rejects a tag name
+          # as target_commitish (it wants a branch name or a full SHA).
           gh release view "${{ inputs.ref }}" >/dev/null 2>&1 \
             || gh release create "${{ inputs.ref }}" \
                  --title "${{ inputs.ref }} (+ Windows/Linux wheels)" \
-                 --notes "Windows and Linux wheels for pywellen ${{ inputs.ref }}, built via maturin from this fork. Not published to PyPI; for direct-URL consumption only (e.g. waver-mcp)." \
-                 --target "${{ inputs.ref }}"
+                 --notes "Windows and Linux wheels for pywellen ${{ inputs.ref }}, built via maturin from this fork. Not published to PyPI; for direct-URL consumption only (e.g. waver-mcp)."
           gh release upload "${{ inputs.ref }}" dist/*.whl --clobber
