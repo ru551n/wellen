@@ -1,0 +1,58 @@
+name: sync fork with upstream
+
+# Keeps this fork's main branch up to date with ekiwi/wellen via a real
+# merge (not a force fast-forward/reset), so our own additions (this
+# workflow, wheels.yml) survive. Also fetches new upstream tags and, for
+# the newest one not yet released here, kicks off wheels.yml to build and
+# publish the Windows/Linux wheels automatically.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/ekiwi/wellen.git
+          git fetch upstream --tags
+      - name: Merge upstream/main into main
+        run: |
+          git checkout main
+          git merge --no-edit upstream/main
+      - name: Push main and tags
+        run: |
+          git push origin main
+          git push origin --tags
+      - name: Find the newest upstream version tag not yet released here
+        id: new_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=""
+          for t in $(git tag --list 'v*' --sort=-v:refname); do
+            if ! gh release view "$t" >/dev/null 2>&1; then
+              tag="$t"
+              break
+            fi
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Trigger wheel build for it
+        if: steps.new_tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run wheels.yml -f ref=${{ steps.new_tag.outputs.tag }}

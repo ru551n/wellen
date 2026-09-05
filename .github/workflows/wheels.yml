@@ -1,0 +1,113 @@
+name: extra wheels (fork-only, not published to PyPI)
+
+# Builds pywellen wheels for windows and linux via maturin and attaches
+# them to a GitHub Release on this fork (reusing the plain upstream tag
+# name, e.g. "v0.25.6"). Not published to PyPI -- for direct-URL
+# consumption by downstream consumers (e.g. waver-mcp) that want every
+# non-macOS platform wheel sourced from one consistent, versioned place
+# instead of mixing "official PyPI" and "our fork".
+#
+# Linux already gets official wheels from upstream's own release.yml
+# (PyPI), but we rebuild it here too so waver-mcp can source linux +
+# windows from the same release/tag as one coordinated update.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or commit to build (must exist in this repo)"
+        required: true
+      python-versions:
+        description: "Comma-separated CPython versions to build wheels for"
+        required: false
+        default: "3.12,3.13,3.14"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.split.outputs.versions }}
+    steps:
+      - id: split
+        shell: bash
+        run: |
+          versions=$(python3 -c "import json,sys; print(json.dumps('${{ inputs.python-versions }}'.split(',')))")
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.prepare.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          args: --release --manifest-path pywellen/Cargo.toml --out dist --interpreter python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-py${{ matrix.python-version }}
+          path: dist/*.whl
+
+  build-linux:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --manifest-path pywellen/Cargo.toml --out dist --find-interpreter
+          sccache: "true"
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist/*.whl
+
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Create/update release with wheel assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Reuse the plain upstream tag as the release tag (no suffix):
+          # keeps the version string a clean semver so the github-releases
+          # datasource / Renovate's regex managers in downstream consumers
+          # (e.g. waver-mcp) can track it without prerelease-suffix
+          # ambiguity.
+          gh release view "${{ inputs.ref }}" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.ref }}" \
+                 --title "${{ inputs.ref }} (+ Windows/Linux wheels)" \
+                 --notes "Windows and Linux wheels for pywellen ${{ inputs.ref }}, built via maturin from this fork. Not published to PyPI; for direct-URL consumption only (e.g. waver-mcp)." \
+                 --target "${{ inputs.ref }}"
+          gh release upload "${{ inputs.ref }}" dist/*.whl --clobber
